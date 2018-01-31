@@ -91,7 +91,7 @@ sys_uptime(void)
 }
 //mine
 int 
-sys_printInfo(void)
+sys_printInfo(void)       //my syscall
 {
   return printInfo();
 }

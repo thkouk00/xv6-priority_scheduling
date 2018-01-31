@@ -52,7 +52,6 @@ struct proc {
   double priority;             // Process Priority , zero at first , lower value/higher priority
   uint creation_time;
   uint running_time;
-  //long sleeping_counter;
   long sched_counter;
 };
 

@@ -55,11 +55,10 @@ void
 cprintf(char *fmt, ...)
 {
   int i, c, locking;
-  //int i, c;
   uint *argp;
   char *s;
 
-  locking = cons.locking;                 //na ta bgalw apo sxolia sto telos 
+  locking = cons.locking;                 
   if(locking)
     acquire(&cons.lock);
 

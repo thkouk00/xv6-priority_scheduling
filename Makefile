@@ -182,8 +182,8 @@ UPROGS=\
 	_wl5\
 	
 
-fs.img: mkfs README WL2 EMPTY $(UPROGS)
-	./mkfs fs.img README WL2 EMPTY $(UPROGS)
+fs.img: mkfs README WL2 $(UPROGS)
+	./mkfs fs.img README WL2 $(UPROGS)
 
 -include *.d
 

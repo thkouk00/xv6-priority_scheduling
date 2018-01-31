@@ -6,9 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
-
-
+#include "max_heap.h"
 
 struct {
   struct spinlock lock;
@@ -23,27 +21,22 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
-/*typedef struct Min_Heap{
-  struct proc* p;
-}Min_Heap;*/
-
 
 void init_heap();           
 void insert_to_heap(struct proc* p);
 void heapify();
 struct proc* pop();
 void show_heap();
-//static Min_Heap min_heap[NPROC];
+
 static struct proc* min_heap[NPROC];
-////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
 
-  init_heap();                //mine
+  init_heap();                											
 }
 
 // Must be called with interrupts disabled
@@ -108,8 +101,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  p->priority = 0.0;      // default priority , create a process 
-  p->running_time = 0;
+  p->priority = 0.0;      							// default priority 
+  p->running_time = 0;								// other useful info 
   p->creation_time = ticks;
   p->sched_counter = 0;
   release(&ptable.lock);
@@ -169,10 +162,8 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
   p->state = RUNNABLE;
-////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
   insert_to_heap(p);		//default priority = 0
-////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   release(&ptable.lock);
 }
@@ -240,10 +231,9 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;      
-  np->priority = 0.0;
-  //cprintf("FORK %s prior %d\n",np->name,(int)(np->priority*100));
+  np->priority = 0.0;														//default priority 0 , from allocproc
   insert_to_heap(np); 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
   release(&ptable.lock);
 
   return pid;
@@ -362,12 +352,11 @@ scheduler(void)
 	    // Loop over process table looking for process to run.
 	    acquire(&ptable.lock);
 	   
-	    //for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){   		// RR scheduling
 	      
 	    int i;
-	    for(i=0;i<NPROC;i++)
+	    for(i=0;i<NPROC;i++)														//priority scheduler
 	    {
-			if (min_heap[0] && min_heap[0]->state == RUNNABLE)
+			if (min_heap[0] && min_heap[0]->state == RUNNABLE)						//choose root of heap
 				p = pop();
 	      	else 
 	      		continue;
@@ -377,7 +366,7 @@ scheduler(void)
 			c->proc = p;
 			switchuvm(p);
 			p->state = RUNNING;
-			p->sched_counter++;
+			p->sched_counter++;														//increase scheduled counter
 
 			swtch(&(c->scheduler), p->context);
 			switchkvm();
@@ -421,11 +410,15 @@ yield(void)
   	acquire(&ptable.lock);  //DOC: yieldlock
   	myproc()->state = RUNNABLE;
   	myproc()->running_time++;
-  	myproc()->priority = (double)(myproc()->running_time)/ (double)(ticks - myproc()->creation_time);
-  	if (myproc()->priority >= 0.99)
-  		myproc()->priority = 0.5;
-  	insert_to_heap(myproc());
-  
+  	myproc()->priority = (double)(myproc()->running_time)/ (double)(ticks - myproc()->creation_time);		//calculate new priority
+  	
+    /*if (myproc()->priority >= 0.99)																			
+  		myproc()->priority = 0.5;*/
+
+    if (strncmp(myproc()->name,"sh", 2)==0 || strncmp(myproc()->name,"ps", 2)==0)     //change priority to reduce lagging for syscall
+      myproc()->priority=0.0;
+  	
+    insert_to_heap(myproc());																				//insert process to heap
   	sched();
   	release(&ptable.lock);
 }
@@ -505,11 +498,16 @@ wakeup1(void *chan)
 		{
 			p->state = RUNNABLE;
 			
-			p->priority = (double)(p->running_time)/(double)(ticks - p->creation_time);
-			if (p->priority >= 0.99)
-  				p->priority = 0.5;
-		  	insert_to_heap(p);
-		}
+			p->priority = (double)(p->running_time)/(double)(ticks - p->creation_time);			//calculate new priority
+			
+      /*if (p->priority >= 0.99)															
+  				p->priority = 0.5;*/
+
+      if (strncmp(p->name,"sh", 2)==0 || strncmp(p->name,"ps", 2)==0)               //change priority to reduce lagging for syscall
+        p->priority=0.0;
+		  
+      insert_to_heap(p);																	//insert process to heap
+		}				
 	}
 }     
 
@@ -540,12 +538,10 @@ kill(int pid)
 			if(p->state == SLEEPING)
 			{
 				p->state = RUNNABLE;
-				//p->priority = (double)(p->running_time)/(double)(ticks - p->creation_time);
-				p->priority = 0.0;													//run faster than other ps
+				p->priority = 0.0;												//high priority to run first
 				insert_to_heap(p);
-		  	}
+		  }
 		  	release(&ptable.lock);
-		  	cprintf("KILL1 pr %d\n",(int)(p->priority*100));
 		  	return 0;
 		}
 	}
@@ -593,42 +589,40 @@ procdump(void)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int
-printInfo()
+printInfo()							//syscall to print infos
 {
   struct proc *p;
-  sti();
+  //sti();    //enable interupts
 
   acquire(&ptable.lock);
   cprintf("Name \t pid\t parent\t state\t\t priority\t R_t\t Cr_t\t Curr_T\t Sch_t\t \n");
   for (p=ptable.proc;p<&ptable.proc[NPROC];p++)
   {
-    
+    if (p->pid ==1)                         //first process has no parent,so i put init's pid for printing purpose 
+      p->parent->pid = 1;
     if (p->state == SLEEPING)
     {
-    	cprintf("%s \t %d\t %s\t SLEEPING\t %d\t\t %d\t %d\t %d\t %d\t\n",p->name,p->pid,p->parent->name,(int)(p->priority*100),p->running_time,p->creation_time,ticks,p->sched_counter);
+    	cprintf("%s \t %d\t %d\t SLEEPING\t %d\t\t %d\t %d\t %d\t %d\t\n",p->name,p->pid,p->parent->pid,(int)(p->priority*100),p->running_time,p->creation_time,ticks,p->sched_counter);
     }
     else if (p->state == RUNNING)
     {
-    	cprintf("%s \t %d\t %s\t RUNNING\t %d\t\t %d\t %d\t %d\t %d\t\n",p->name,p->pid,p->parent->name,(int)(p->priority*100),p->running_time,p->creation_time,ticks,p->sched_counter);
-
+    	cprintf("%s \t %d\t %d\t RUNNING\t %d\t\t %d\t %d\t %d\t %d\t\n",p->name,p->pid,p->parent->pid,(int)(p->priority*100),p->running_time,p->creation_time,ticks,p->sched_counter);
     }
     else if (p->state == RUNNABLE)
     {
-	    cprintf("%s \t %d\t %s\t RUNNABLE\t %d\t\t %d\t %d\t %d\t %d\t\n",p->name,p->pid,p->parent->name,(int)(p->priority*100),p->running_time,p->creation_time,ticks,p->sched_counter);
-
+	    cprintf("%s \t %d\t %d\t RUNNABLE\t %d\t\t %d\t %d\t %d\t %d\t\n",p->name,p->pid,p->parent->pid,(int)(p->priority*100),p->running_time,p->creation_time,ticks,p->sched_counter);
     }
   }
   cprintf("\n\n");
-  show_heap();
 
   release(&ptable.lock);
   
   return 22;
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void                                    // min_heap structure
+void                                    	// min_heap structure
 init_heap()
 {
     int i;
@@ -637,9 +631,8 @@ init_heap()
 }
 
 void
-insert_to_heap(struct proc* p)
+insert_to_heap(struct proc* p)				//insertion to heap
 {
-	//cprintf("INSERT %s id:%d rt:%d pr:%d\n",p->name,p->pid,p->running_time,(int)(p->priority*100));
 	int i;
 	for (i=0;i<NPROC;i++)
 	{
@@ -656,10 +649,10 @@ void
 heapify()
 {
 	int i;
-  	//int y;
+  	int y;
   	struct proc* temp;
-  	//for (y=0;y<NPROC;y++)          //isos den xreiazetai ayto 
- 	//{ 
+  	for (y=0;y<NPROC;y++)          
+ 	{ 
 	    for (i=NPROC-1;i>=0;i--)
 	    {
 	    	if (min_heap[i] && min_heap[i]->priority < min_heap[(i-1)/2]->priority)
@@ -669,7 +662,7 @@ heapify()
 		        min_heap[i] = temp;
 	    	}
 	    }
-	//}
+	}
 }
 
 struct proc*
@@ -692,7 +685,7 @@ pop()
 
 void show_heap()
 {
-	cprintf("mpika show\n");
+	cprintf("Show heap\n");
 	int i;
 	for(i=0;i<NPROC;i++)
 	{
